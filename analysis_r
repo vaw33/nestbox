@@ -1,0 +1,286 @@
+setwd("/Users/victoriawiley/Library/CloudStorage/Dropbox/Documents/_PhD/Manuscripts/6_Nestbox/data") 
+
+# ==========================================
+# SETUP & DATA IMPORT
+# ==========================================
+library(tidyverse) 
+library(lubridate) 
+
+ibutton_data <- read_csv("raw_data_CB.csv") 
+ambient_data <- read_csv("temp_data_mason_center.csv") 
+
+# ==========================================
+# STEP 1: CLEAN IBUTTON DATA & APPLY TOP-LEVEL FILTER
+# ==========================================
+data_prepped <- ibutton_data %>% 
+  mutate( 
+    date_time = mdy_hm(date_time),  
+    date = as_date(date_time) 
+  ) %>%
+  # TOP LEVEL FIX 1: Removes these 3 dates before anything else happens
+  filter(!date %in% as_date(c("2023-04-18", "2023-04-19", "2023-05-01"))) 
+
+daily_extremes <- data_prepped %>% 
+  group_by(id, date) %>% 
+  summarize( 
+    max_temp = max(temp, na.rm = TRUE), 
+    min_temp = min(temp, na.rm = TRUE), 
+    .groups = "drop" 
+  ) 
+
+# ==========================================
+# STEP 2: AVERAGE PROTOTYPE REPLICATES
+# ==========================================
+daily_averaged <- daily_extremes %>% 
+  mutate( 
+    base_id = str_remove(id, "-.*"), 
+    id = ifelse(str_detect(base_id, "SAG"), id, paste0(base_id, "_avg")) 
+  ) %>% 
+  group_by(id, date) %>% 
+  summarize( 
+    max_temp = mean(max_temp, na.rm = TRUE), 
+    min_temp = mean(min_temp, na.rm = TRUE), 
+    .groups = "drop" 
+  ) %>%
+  # NEW FIX: Drops any CB_avg dates prior to May 9th. Leaves all other boxes alone.
+  filter(!(id == "CB_avg" & date < as_date("2023-05-09")))
+
+# ==========================================
+# STEP 3: CLEAN AMBIENT DATA
+# ==========================================
+ambient_clean <- ambient_data %>% 
+  mutate( 
+    date = mdy(date), 
+    ambient_range = max_ambient - min_ambient 
+  ) %>%
+  # TOP LEVEL FIX 2: Ensures ambient data perfectly matches iButton data
+  filter(!date %in% as_date(c("2023-04-18", "2023-04-19", "2023-05-01"))) 
+
+# ==========================================
+# STEP 4: MERGE & CONVERT TO CELSIUS
+# ==========================================
+final_data_C <- daily_averaged %>% 
+  left_join(ambient_clean, by = "date") %>% 
+  
+  mutate( 
+    max_temp_C = (max_temp - 32) * (5/9), 
+    min_temp_C = (min_temp - 32) * (5/9), 
+    max_ambient_C = (max_ambient - 32) * (5/9), 
+    min_ambient_C = (min_ambient - 32) * (5/9) 
+  ) %>% 
+  
+  mutate( 
+    delta_ambient_high_C = max_temp_C - max_ambient_C, 
+    delta_ambient_low_C = min_temp_C - min_ambient_C, 
+    cavity_range_C = max_temp_C - min_temp_C, 
+    ambient_range_C = max_ambient_C - min_ambient_C, 
+    range_difference_C = ambient_range_C - cavity_range_C 
+  ) %>% 
+  drop_na() %>% 
+  mutate(across(where(is.numeric), ~ round(., 2))) 
+
+write_csv(final_data_C, "Final_Cavity_Temperatures_Metric.csv") 
+
+
+# ==========================================
+# STEP 5: STATISTICAL ANALYSIS (ANOVAS)
+# ==========================================
+# Running these first dictates the significance letters for the table below!
+
+# 1. Maximum Daily Temperature (Peak Heat Mitigation) 
+cat("\n--- ANOVA: Maximum Daily Temperature Mitigation ---\n") 
+anova_max <- aov(delta_ambient_high_C ~ id, data = final_data_C) 
+print(summary(anova_max)) 
+
+cat("\n--- TUKEY HSD: Maximum Daily Temperature ---\n") 
+tukey_max <- TukeyHSD(anova_max) 
+print(tukey_max) 
+
+# 2. Minimum Daily Temperature (Overnight Heat Retention) 
+cat("\n--- ANOVA: Minimum Daily Temperature Retention ---\n") 
+anova_min <- aov(delta_ambient_low_C ~ id, data = final_data_C) 
+print(summary(anova_min)) 
+
+cat("\n--- TUKEY HSD: Minimum Daily Temperature ---\n") 
+tukey_min <- TukeyHSD(anova_min) 
+print(tukey_min) 
+
+# 3. Overall Buffering Capacity 
+cat("\n--- ANOVA: Overall Buffering Capacity ---\n") 
+anova_buf <- aov(range_difference_C ~ id, data = final_data_C) 
+print(summary(anova_buf)) 
+
+cat("\n--- TUKEY HSD: Overall Buffering Capacity ---\n") 
+tukey_buf <- TukeyHSD(anova_buf) 
+print(tukey_buf) 
+
+# Optional plot
+plot(tukey_buf, las = 1, col = "blue") 
+
+
+# ==========================================
+# STEP 6: PUBLICATION TABLE (WITH SIG LETTERS)
+# ==========================================
+final_data_metric <- daily_averaged %>% 
+  left_join(ambient_clean, by = "date") %>% 
+  mutate( 
+    max_temp_C = (max_temp - 32) * (5/9), 
+    min_temp_C = (min_temp - 32) * (5/9), 
+    max_ambient_C = (max_ambient - 32) * (5/9), 
+    min_ambient_C = (min_ambient - 32) * (5/9) 
+  ) %>% 
+  mutate( 
+    delta_ambient_high_C = max_temp_C - max_ambient_C, 
+    delta_ambient_low_C = min_temp_C - min_ambient_C, 
+    range_difference_C = (max_ambient_C - min_ambient_C) - (max_temp_C - min_temp_C) 
+  ) %>% 
+  drop_na() 
+
+publication_table <- final_data_metric %>% 
+  group_by(id) %>% 
+  summarize( 
+    mean_high_C = mean(delta_ambient_high_C), 
+    sd_high_C = sd(delta_ambient_high_C), 
+    mean_low_C = mean(delta_ambient_low_C), 
+    sd_low_C = sd(delta_ambient_low_C), 
+    mean_buf_C = mean(range_difference_C), 
+    sd_buf_C = sd(range_difference_C), 
+    .groups = "drop" 
+  ) %>% 
+  transmute( 
+    Cavity_Name = factor(id,  
+                         levels = c("G_avg", "GC_avg", "GK_avg", "CB_avg", "TB_avg", "SAG1", "SAG2"), 
+                         labels = c("Plastic Gourd", "Design 1", "Design 2", "Design 3", "Wood Box", "Saguaro 1", "Saguaro 2")), 
+    
+    Daily_Max_Delta = case_when( 
+      id %in% c("SAG1", "SAG2") ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " a"), 
+      id == "GC_avg"            ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " b"), 
+      id == "GK_avg"            ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " c"), 
+      id == "TB_avg"            ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " cd"), 
+      id == "CB_avg"            ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " de"), # Updated
+      id == "G_avg"             ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " e") 
+    ), 
+    
+    Daily_Min_Delta = case_when( 
+      id %in% c("SAG1", "SAG2")             ~ paste0(round(mean_low_C, 1), " ± ", round(sd_low_C, 1), " a"), 
+      id == "GC_avg"                        ~ paste0(round(mean_low_C, 1), " ± ", round(sd_low_C, 1), " b"),
+      id == "CB_avg"                        ~ paste0(round(mean_low_C, 1), " ± ", round(sd_low_C, 1), " bc"),
+      id %in% c("GK_avg", "TB_avg", "G_avg")~ paste0(round(mean_low_C, 1), " ± ", round(sd_low_C, 1), " c") 
+    ), 
+    
+    Buffering_Capacity = case_when( 
+      id %in% c("SAG1", "SAG2") ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " a"), 
+      id == "GC_avg"            ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " b"), 
+      id %in% c("GK_avg", "TB_avg") ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " c"), 
+      id == "CB_avg"            ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " cd"), # Updated
+      id == "G_avg"             ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " d") 
+    ) 
+  ) %>% 
+  arrange(Cavity_Name) 
+
+View(publication_table) 
+write_csv(publication_table, "Table1_Thermal_Summary_C.csv")
+
+# Ambient Only Export
+ambient_only_C <- ambient_clean %>%
+  mutate(
+    max_ambient_C = round((max_ambient - 32) * (5/9), 2),
+    min_ambient_C = round((min_ambient - 32) * (5/9), 2)
+  ) %>%
+  select(date, max_ambient_C, min_ambient_C)
+
+write_csv(ambient_only_C, "Ambient_Only_Celsius.csv")
+
+
+# ==========================================
+# STEP 7: MASTER TEMPERATURE TIME-SERIES PLOT
+# ==========================================
+plot_data <- final_data_C %>%
+  mutate(
+    id = factor(id, 
+                levels = c("SAG1", "SAG2", "GC_avg", "GK_avg", "CB_avg", "TB_avg", "G_avg"),
+                labels = c("Saguaro 1", "Saguaro 2", "Design 1", "Design 2", "Design 3", "Wood Box", "Plastic Gourd"))
+  )
+
+treatment_colors <- c( 
+  "Saguaro 1"     = "springgreen4", 
+  "Saguaro 2"     = "springgreen4", 
+  "Design 1"      = "goldenrod4", 
+  "Design 2"      = "goldenrod4", 
+  "Design 3"      = "goldenrod4", 
+  "Wood Box"      = "goldenrod4", 
+  "Plastic Gourd" = "goldenrod4", 
+  "Max Ambient"   = "tomato1", 
+  "Min Ambient"   = "steelblue3" 
+) 
+
+custom_shape_color_labels <- c( 
+  "Saguaro 1"     = "Saguaro 1", 
+  "Saguaro 2"     = "Saguaro 2", 
+  "Design 1"      = "Design 1", 
+  "Design 2"      = "Design 2", 
+  "Design 3"      = "Design 3",
+  "Wood Box"      = "Wood Box", 
+  "Plastic Gourd" = "Plastic Gourd", 
+  "Max Ambient"   = expression(T[max]~Ambient), 
+  "Min Ambient"   = expression(T[min]~Ambient) 
+) 
+
+custom_linetype_labels <- c( 
+  "Max Temperature" = expression(T[max]~Cavity), 
+  "Min Temperature" = expression(T[min]~Cavity) 
+) 
+
+master_line_plot <- ggplot(plot_data, aes(x = date)) + 
+  geom_line(data = distinct(plot_data, date, max_ambient_C),  
+            aes(y = max_ambient_C, color = "Max Ambient", shape = "Max Ambient"),  
+            linewidth = 0.5) + 
+  geom_line(data = distinct(plot_data, date, min_ambient_C),  
+            aes(y = min_ambient_C, color = "Min Ambient", shape = "Min Ambient"),  
+            linewidth = 0.5) + 
+  geom_line(aes(y = max_temp_C, color = id, group = id, linetype = "Max Temperature"),  
+            linewidth = 0.5, alpha = 0.5) + 
+  geom_point(aes(y = max_temp_C, color = id, group = id, shape = id),  
+             size = 2.0, alpha = 0.8) + 
+  geom_line(aes(y = min_temp_C, color = id, group = id, linetype = "Min Temperature"),  
+            linewidth = 0.5, alpha = 0.5) + 
+  geom_point(aes(y = min_temp_C, color = id, group = id, shape = id),  
+             size = 2.0, alpha = 0.8) + 
+  scale_color_manual(name = NULL, values = treatment_colors, labels = custom_shape_color_labels) +  
+  scale_shape_manual(name = NULL,  
+                     values = c("Saguaro 1" = 4, "Saguaro 2" = 5, "Design 1" = 1, "Design 2" = 2, "Design 3" = 6, 
+                                "Wood Box" = 3, "Plastic Gourd" = 0, "Max Ambient" = NA, "Min Ambient" = NA), 
+                     labels = custom_shape_color_labels) + 
+  scale_linetype_manual(name = NULL,  
+                        values = c("Max Temperature" = "solid", "Min Temperature" = "dashed"), 
+                        labels = custom_linetype_labels) + 
+  guides( 
+    color = guide_legend(override.aes = list(alpha = 1)), 
+    shape = guide_legend(override.aes = list(alpha = 1)) 
+  ) + 
+  scale_x_date(breaks = seq(as.Date("2023-04-20"), as.Date("2023-05-11"), by = "day"), 
+               date_labels = "%m/%d") +  
+  theme_minimal() + 
+  labs(x = "Date", y = "Temperature (°C)") + 
+  theme( 
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    axis.line = element_line(color = "black", linewidth = 0.5), 
+    legend.position = "right", 
+    legend.box = "vertical",
+    
+    axis.title.x = element_text(margin = margin(t = 15)), # 't' adds space to the Top
+    axis.title.y = element_text(margin = margin(r = 15))  # 'r' adds space to the Right
+    
+    
+  ) 
+
+print(master_line_plot)
+
+# ==========================================
+# STEP 8: CHI-SQUARE GOODNESS OF FIT
+# ==========================================
+observed_counts <- c(8, 7, 3, 3, 2, 1)
+names(observed_counts) <- c("SW", "S", "N", "E", "W", "NE")
+
+test_result <- chisq.test(observed_counts)
+print(test_result)
