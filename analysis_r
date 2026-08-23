@@ -6,7 +6,7 @@ setwd("/Users/victoriawiley/Library/CloudStorage/Dropbox/Documents/_PhD/Manuscri
 library(tidyverse) 
 library(lubridate) 
 
-ibutton_data <- read_csv("raw_data_CB.csv") 
+ibutton_data <- read_csv("raw_data.csv") 
 ambient_data <- read_csv("temp_data_mason_center.csv") 
 
 # ==========================================
@@ -41,9 +41,7 @@ daily_averaged <- daily_extremes %>%
     max_temp = mean(max_temp, na.rm = TRUE), 
     min_temp = mean(min_temp, na.rm = TRUE), 
     .groups = "drop" 
-  ) %>%
-  # NEW FIX: Drops any CB_avg dates prior to May 9th. Leaves all other boxes alone.
-  filter(!(id == "CB_avg" & date < as_date("2023-05-09")))
+  ) 
 
 # ==========================================
 # STEP 3: CLEAN AMBIENT DATA
@@ -115,7 +113,7 @@ tukey_buf <- TukeyHSD(anova_buf)
 print(tukey_buf) 
 
 # Optional plot
-plot(tukey_buf, las = 1, col = "blue") 
+#plot(tukey_buf, las = 1, col = "blue") 
 
 
 # ==========================================
@@ -149,7 +147,7 @@ publication_table <- final_data_metric %>%
   ) %>% 
   transmute( 
     Cavity_Name = factor(id,  
-                         levels = c("G_avg", "GC_avg", "GK_avg", "CB_avg", "TB_avg", "SAG1", "SAG2"), 
+                         levels = c("G_avg", "GC_avg", "LH_avg", "GK_avg", "TB_avg", "SAG1", "SAG2"), 
                          labels = c("Plastic Gourd", "Design 1", "Design 2", "Design 3", "Wood Box", "Saguaro 1", "Saguaro 2")), 
     
     Daily_Max_Delta = case_when( 
@@ -157,14 +155,14 @@ publication_table <- final_data_metric %>%
       id == "GC_avg"            ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " b"), 
       id == "GK_avg"            ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " c"), 
       id == "TB_avg"            ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " cd"), 
-      id == "CB_avg"            ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " de"), # Updated
+      id == "LH_avg"            ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " de"), 
       id == "G_avg"             ~ paste0(round(mean_high_C, 1), " ± ", round(sd_high_C, 1), " e") 
     ), 
     
     Daily_Min_Delta = case_when( 
       id %in% c("SAG1", "SAG2")             ~ paste0(round(mean_low_C, 1), " ± ", round(sd_low_C, 1), " a"), 
       id == "GC_avg"                        ~ paste0(round(mean_low_C, 1), " ± ", round(sd_low_C, 1), " b"),
-      id == "CB_avg"                        ~ paste0(round(mean_low_C, 1), " ± ", round(sd_low_C, 1), " bc"),
+      id == "LH_avg"                        ~ paste0(round(mean_low_C, 1), " ± ", round(sd_low_C, 1), " bc"),
       id %in% c("GK_avg", "TB_avg", "G_avg")~ paste0(round(mean_low_C, 1), " ± ", round(sd_low_C, 1), " c") 
     ), 
     
@@ -172,7 +170,7 @@ publication_table <- final_data_metric %>%
       id %in% c("SAG1", "SAG2") ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " a"), 
       id == "GC_avg"            ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " b"), 
       id %in% c("GK_avg", "TB_avg") ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " c"), 
-      id == "CB_avg"            ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " cd"), # Updated
+      id == "LH_avg"            ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " cd"), 
       id == "G_avg"             ~ paste0(round(mean_buf_C, 1), " ± ", round(sd_buf_C, 1), " d") 
     ) 
   ) %>% 
@@ -189,7 +187,7 @@ ambient_only_C <- ambient_clean %>%
   ) %>%
   select(date, max_ambient_C, min_ambient_C)
 
-write_csv(ambient_only_C, "Ambient_Only_Celsius.csv")
+write_csv(ambient_only_C, "tempdata_C.csv")
 
 
 # ==========================================
@@ -197,8 +195,9 @@ write_csv(ambient_only_C, "Ambient_Only_Celsius.csv")
 # ==========================================
 plot_data <- final_data_C %>%
   mutate(
+    # FIX: Swapped LH_avg and GK_avg order here as well!
     id = factor(id, 
-                levels = c("SAG1", "SAG2", "GC_avg", "GK_avg", "CB_avg", "TB_avg", "G_avg"),
+                levels = c("SAG1", "SAG2", "GC_avg", "LH_avg", "GK_avg", "TB_avg", "G_avg"),
                 labels = c("Saguaro 1", "Saguaro 2", "Design 1", "Design 2", "Design 3", "Wood Box", "Plastic Gourd"))
   )
 
@@ -259,7 +258,7 @@ master_line_plot <- ggplot(plot_data, aes(x = date)) +
     shape = guide_legend(override.aes = list(alpha = 1)) 
   ) + 
   scale_x_date(breaks = seq(as.Date("2023-04-20"), as.Date("2023-05-11"), by = "day"), 
-               date_labels = "%m/%d") +  
+               date_labels = "%d %b") +  
   theme_minimal() + 
   labs(x = "Date", y = "Temperature (°C)") + 
   theme( 
@@ -268,10 +267,8 @@ master_line_plot <- ggplot(plot_data, aes(x = date)) +
     legend.position = "right", 
     legend.box = "vertical",
     
-    axis.title.x = element_text(margin = margin(t = 15)), # 't' adds space to the Top
-    axis.title.y = element_text(margin = margin(r = 15))  # 'r' adds space to the Right
-    
-    
+    axis.title.x = element_text(margin = margin(t = 15)), 
+    axis.title.y = element_text(margin = margin(r = 15))  
   ) 
 
 print(master_line_plot)
@@ -284,3 +281,190 @@ names(observed_counts) <- c("SW", "S", "N", "E", "W", "NE")
 
 test_result <- chisq.test(observed_counts)
 print(test_result)
+
+# ==========================================
+# STEP 9: 72-HOUR CONTINUOUS THERMAL LAG PLOT
+# ==========================================
+# 1. Load and format the continuous 15-min ambient data
+ambient_continuous <- read_csv("temp_data_apr22_apr24.csv") %>%
+  mutate(
+    # FIX: Use parse_date_time to safely catch AM/PM formats or hidden seconds
+    date_time = parse_date_time(paste(date, time), orders = c("mdy IMp", "mdy HMS", "mdy HM")),
+    temp_C = (temp - 32) * (5/9),
+    id = "Ambient Air"
+  ) %>%
+  # Explicitly call dplyr::select to prevent background masking errors
+  dplyr::select(id, date_time, temp_C) %>%
+  drop_na(temp_C)
+
+# 2. Extract and prep the 15-min iButton data for those same 3 days
+cavity_continuous <- data_prepped %>%
+  filter(date %in% as_date(c("2023-04-22", "2023-04-23", "2023-04-24"))) %>%
+  mutate(
+    base_id = str_remove(id, "-.*"),
+    id = ifelse(str_detect(base_id, "SAG"), id, paste0(base_id, "_avg"))
+  ) %>%
+  # CRITICAL: Group by exact date_time to keep the 15-min intervals!
+  group_by(id, date_time) %>%
+  summarize(temp = mean(temp, na.rm = TRUE), .groups = "drop") %>%
+  mutate(temp_C = (temp - 32) * (5/9)) %>%
+  # FIX: Explicitly call dplyr::select to prevent masking errors
+  dplyr::select(id, date_time, temp_C)
+
+# 3. Combine both datasets into one master plot frame
+lag_plot_data <- bind_rows(cavity_continuous, ambient_continuous) %>%
+  mutate(
+    id = factor(id, 
+                levels = c("SAG1", "SAG2", "GC_avg", "LH_avg", "GK_avg", "TB_avg", "G_avg", "Ambient Air"),
+                # CHANGED: "Plastic Gourd" to "Bottle Gourd"
+                labels = c("Saguaro 1", "Saguaro 2", "Design 1", "Design 2", "Design 3", "Wood Box", "Bottle Gourd", "Ambient Air"))
+  )
+
+# 4. Define a highly distinct color palette for continuous lines
+lag_colors <- c( 
+  "Saguaro 1"    = "#1B9E77", # Dark Green
+  "Saguaro 2"    = "#66A61E", # Light Green
+  "Design 1"     = "#7570B3", # Purple
+  "Design 2"     = "#E7298A", # Pink
+  "Design 3"     = "#D95F02", # Orange
+  "Wood Box"     = "#A6761D", # Brown
+  "Bottle Gourd" = "#E6AB02", # CHANGED: "Plastic Gourd" to "Bottle Gourd"
+  "Ambient Air"  = "black" 
+) 
+
+# 5. Generate the Plot 
+thermal_lag_plot <- ggplot(lag_plot_data, aes(x = date_time, y = temp_C, color = id, group = id)) + 
+  geom_line(aes(linetype = id == "Ambient Air", linewidth = id == "Ambient Air"), alpha = 0.9) + 
+  scale_color_manual(name = "Cavity", values = lag_colors) +
+  scale_linetype_manual(values = c("FALSE" = "solid", "TRUE" = "dashed"), guide = "none") +
+  scale_linewidth_manual(values = c("FALSE" = 0.4, "TRUE" = 0.8), guide = "none") +
+  scale_x_datetime(date_breaks = "12 hours", date_labels = "%d %b\n%H:%M") +
+  theme_minimal() + 
+  labs(
+    x = "Time", 
+    y = "Temperature (°C)"
+  ) + 
+  theme( 
+    axis.text.x = element_text(angle = 45, hjust = 1), 
+    axis.line = element_line(color = "black", linewidth = 0.5), 
+    legend.position = "right", 
+    
+    # FIX: Added this line to make the legend title smaller
+    legend.title = element_text(size = 10), 
+    
+    axis.title.x = element_text(margin = margin(t = 15)), 
+    axis.title.y = element_text(margin = margin(r = 15))  
+  ) 
+
+print(thermal_lag_plot)
+
+
+###min and max daily temps
+
+library(tidyverse)
+library(lubridate)
+
+# 1. Load the dataset
+all_data <- read_csv("tempdata_alldata_15min.csv")
+
+# 2. Calculate daily extremes
+daily_summary <- all_data %>%
+  # Convert the character date to a true Date object for chronological sorting
+  mutate(date = mdy(date)) %>%
+  group_by(date) %>%
+  summarize(
+    min_temp = min(temp, na.rm = TRUE),
+    max_temp = max(temp, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# 3. View the table
+print(daily_summary)
+
+
+# ==========================================
+# CALCULATE TIME-BLOCK AVERAGES
+# ==========================================
+
+library(tidyverse)
+library(lubridate)
+
+# 1. Load the dataset
+setwd("/Users/victoriawiley/Library/CloudStorage/Dropbox/Documents/_PhD/Manuscripts/6_Nestbox/data") 
+all_data <- read_csv("tempdata_alldata_15min.csv")
+
+# 2. Calculate the grand mean for specific time blocks in Celsius
+grand_time_summary_C <- all_data %>%
+  mutate(
+    # Combine date and time to extract the exact hour
+    date_time = parse_date_time(paste(date, time), orders = c("mdy IMp", "mdy HMS", "mdy HM")),
+    hr = hour(date_time),
+    
+    # Label the rows that fall into the target windows
+    time_block = case_when(
+      hr >= 4 & hr < 7   ~ "4:00 AM to 6:59 AM",
+      hr >= 13 & hr < 16 ~ "1:00 PM to 3:59 PM",
+      TRUE               ~ "Other"
+    ),
+    
+    # Convert Fahrenheit to Celsius
+    temp_C = (temp - 32) * (5/9)
+  ) %>%
+  # Filter out times of day outside our target blocks
+  filter(time_block != "Other") %>%
+  
+  # Group ONLY by the time block so all dates are averaged together
+  group_by(time_block) %>%
+  summarize(
+    overall_mean_temp_C = round(mean(temp_C, na.rm = TRUE), 2),
+    .groups = "drop"
+  )
+
+# 3. View the final overall averages
+print(grand_time_summary_C)
+
+# ==========================================
+# ABSOLUTE STUDY PERIOD EXTREMES (CELSIUS)
+# ==========================================
+study_extremes_C <- ambient_clean %>%
+  summarize(
+    # Find the single highest temp in the whole dataset, then convert to C
+    absolute_max_C = round((max(max_ambient, na.rm = TRUE) - 32) * (5/9), 2),
+    
+    # Find the single lowest temp in the whole dataset, then convert to C
+    absolute_min_C = round((min(min_ambient, na.rm = TRUE) - 32) * (5/9), 2)
+  )
+
+# Print the result to the screen
+print(study_extremes_C)
+
+# ==========================================
+# LAG TIMES
+# ==========================================
+
+peak_times <- lag_plot_data %>%
+  mutate(clean_date = as_date(date_time)) %>%
+  group_by(id, clean_date) %>%
+  # Find the row with the maximum temperature for that specific day
+  slice_max(temp_C, n = 1, with_ties = FALSE) %>%
+  ungroup() %>%
+  mutate(
+    # Convert the time of day into a decimal number (e.g., 14.5 for 2:30 PM)
+    time_in_hours = hour(date_time) + minute(date_time)/60
+  ) %>%
+  group_by(id) %>%
+  summarize(
+    mean_hour = mean(time_in_hours),
+    # Convert that decimal back into a clean HH:MM clock format
+    avg_peak_time = sprintf("%02d:%02d", floor(mean_hour), round((mean_hour - floor(mean_hour)) * 60)),
+    .groups = "drop"
+  ) %>%
+  select(id, avg_peak_time)
+
+print(peak_times)
+
+
+
+library(multcompView)
+cld_results <- multcompLetters4(anova_max, tukey_max)
+print(cld_results)
