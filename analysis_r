@@ -285,15 +285,13 @@ print(test_result)
 # ==========================================
 # STEP 9: 72-HOUR CONTINUOUS THERMAL LAG PLOT
 # ==========================================
-# 1. Load and format the continuous 15-min ambient data
+# 1. Load ambient temp data
 ambient_continuous <- read_csv("temp_data_apr22_apr24.csv") %>%
   mutate(
-    # FIX: Use parse_date_time to safely catch AM/PM formats or hidden seconds
     date_time = parse_date_time(paste(date, time), orders = c("mdy IMp", "mdy HMS", "mdy HM")),
     temp_C = (temp - 32) * (5/9),
     id = "Ambient Air"
   ) %>%
-  # Explicitly call dplyr::select to prevent background masking errors
   dplyr::select(id, date_time, temp_C) %>%
   drop_na(temp_C)
 
@@ -304,14 +302,12 @@ cavity_continuous <- data_prepped %>%
     base_id = str_remove(id, "-.*"),
     id = ifelse(str_detect(base_id, "SAG"), id, paste0(base_id, "_avg"))
   ) %>%
-  # CRITICAL: Group by exact date_time to keep the 15-min intervals!
   group_by(id, date_time) %>%
   summarize(temp = mean(temp, na.rm = TRUE), .groups = "drop") %>%
   mutate(temp_C = (temp - 32) * (5/9)) %>%
-  # FIX: Explicitly call dplyr::select to prevent masking errors
   dplyr::select(id, date_time, temp_C)
 
-# 3. Combine both datasets into one master plot frame
+# 3. Combine datasets 
 lag_plot_data <- bind_rows(cavity_continuous, ambient_continuous) %>%
   mutate(
     id = factor(id, 
@@ -349,7 +345,6 @@ thermal_lag_plot <- ggplot(lag_plot_data, aes(x = date_time, y = temp_C, color =
     axis.line = element_line(color = "black", linewidth = 0.5), 
     legend.position = "right", 
     
-    # FIX: Added this line to make the legend title smaller
     legend.title = element_text(size = 10), 
     
     axis.title.x = element_text(margin = margin(t = 15)), 
