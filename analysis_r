@@ -276,7 +276,7 @@ print(master_line_plot)
 # ==========================================
 # STEP 8: CHI-SQUARE GOODNESS OF FIT
 # ==========================================
-observed_counts <- c(8, 7, 3, 3, 2, 1)
+observed_counts <- c(8, 7, 5, 3, 2, 1)
 names(observed_counts) <- c("SW", "S", "N", "E", "W", "NE")
 
 test_result <- chisq.test(observed_counts)
